@@ -13,6 +13,7 @@
 #define UPNP_ACTION_ADDPORT _T("AddPortMapping")
 #define UPNP_ACTION_DELPORT _T("DeletePortMapping")
 #define UPNP_ACTION_GETEXIP _T("GetExternalIPAddress")
+#define UPNP_ACTION_GETPMAP _T("GetGenericPortMappingEntry")
 
 #define _COM_PTR_T(TYPE) _com_ptr_t<_com_IIID<TYPE, &__uuidof(TYPE)>>
 
@@ -128,63 +129,63 @@ HRESULT UPnP_getService(LPCTSTR pszServiceName, IUPnPService** pService)
 
 HRESULT UPnP_InvokeAction(IUPnPService* pService, LPCTSTR pszActName, LPCTSTR* params = NULL, ULONG num = 0)
 {
-	SAFEARRAY* psa = ::SafeArrayCreateVector(VT_VARIANT, 0, num);
-	VARIANT* rgElems;
 	HRESULT hr;
-	
+	ULONG i;
+	VARIANT* rgElems;
+	SAFEARRAY* psa = ::SafeArrayCreateVector(VT_VARIANT, 0, num);
 	if (!psa)
 		return E_FAIL;
 	
-	hr = ::SafeArrayAccessData(psa, (void HUGEP**)&rgElems);
-	if (SUCCEEDED(hr))
+	_variant_t varInArgs, varOutArgs, varRet;
+	V_VT(&varInArgs) = VT_VARIANT | VT_ARRAY;
+	V_ARRAY(&varInArgs) = psa;
+	
+	if (num > 0)
 	{
-		_bstr_t bstrActName = pszActName;
-		_variant_t varInArgs, varOutArgs, varRet;
-		ULONG i;
+		hr = ::SafeArrayAccessData(psa, (void HUGEP**)&rgElems);
+		if (FAILED(hr))
+			return hr;
 		
-		CON_PUTS_2(_T("Action : "), pszActName);
 		for (i = 0; i < num; i++)
 		{
 			V_VT(&rgElems[i]) = VT_BSTR;
 			V_BSTR(&rgElems[i]) = ::SysAllocString(params[i]);
 		}
 		::SafeArrayUnaccessData(psa);
-		
-		V_VT(&varInArgs) = VT_VARIANT | VT_ARRAY;
-		V_ARRAY(&varInArgs) = psa;
-		
-		hr = pService->InvokeAction(bstrActName, varInArgs, &varOutArgs, &varRet);
-		if (FAILED(hr))
-		{
-			if (V_VT(&varRet) == VT_BSTR)
-				CON_PUTS_2(_T("Failed : "), V_BSTR(&varRet));
-		}
-		else if (V_ISARRAY(&varOutArgs) && (psa = varOutArgs.parray)->cDims == 1)
-		{
-			hr = ::SafeArrayAccessData(psa, (void HUGEP**)&rgElems);
-			if (SUCCEEDED(hr))
-			{
-				for (i = 0; i < psa->rgsabound[0].cElements; i++)
-				{
-					if (V_VT(&rgElems[i]) == VT_BSTR)
-						CON_PUTS_1(V_BSTR(&rgElems[i]));
-				}
-				::SafeArrayUnaccessData(psa);
-			}
-		}
 	}
-	else
-		::SafeArrayDestroy(psa);
 	
+	_bstr_t bstrActName = pszActName;
+	CON_PUTS_2(_T("Action : "), pszActName);
+	
+	hr = pService->InvokeAction(bstrActName, varInArgs, &varOutArgs, &varRet);
+	if (FAILED(hr))
+	{
+		if (V_VT(&varRet) == VT_BSTR)
+			CON_PUTS_2(_T("Failed : "), V_BSTR(&varRet));
+	}
+	else if (V_ISARRAY(&varOutArgs) && (psa = V_ARRAY(&varOutArgs))->rgsabound[0].cElements > 0)
+	{
+		hr = ::SafeArrayAccessData(psa, (void HUGEP**)&rgElems);
+		if (FAILED(hr))
+			return hr;
+		
+		for (i = 0; i < psa->rgsabound[0].cElements; i++)
+		{
+			if (V_VT(&rgElems[i]) == VT_BSTR)
+				CON_PUTS_1(V_BSTR(&rgElems[i]));
+		}
+		::SafeArrayUnaccessData(psa);
+	}
 	return hr;
 }
 
-int _tmain(int argc, TCHAR *argv[])
+int _tmain(int argc, const TCHAR *argv[])
 {
 	if (argc <= 1 || argc > 7)
 	{
 		CON_PUTS_1(_T("================== \"upnp_cmd\" Parameter Definition for each Action ==================\n"));
 		CON_PUTS_1(_T("GetExternalIPAddress : upnp_cmd type(WANIPConnection:1, WANPPPConnection:1, etc...)"));
+		CON_PUTS_1(_T("GetPortMappingEntry  : upnp_cmd type index"));
 		CON_PUTS_1(_T("AddPortMapping       : upnp_cmd type protocol port IPaddress [description] [duration]"));
 		CON_PUTS_1(_T("DeletePortMapping    : upnp_cmd type protocol port\n"));
 		SYS_PAUSE(argv[0]);
@@ -213,8 +214,10 @@ int _tmain(int argc, TCHAR *argv[])
 		switch (argc)	// ParameterCount=1/2/3~5
 		{
 		case 2:	// GetExternalIPAddress
-		case 3:
 			hr = UPnP_InvokeAction(pService, UPNP_ACTION_GETEXIP);
+			break;
+		case 3:	// GetGenericPortMappingEntry
+			hr = UPnP_InvokeAction(pService, UPNP_ACTION_GETPMAP, &argv[2], 1);
 			break;
 		case 4:	// DeletePortMapping
 			hr = UPnP_InvokeAction(pService, UPNP_ACTION_DELPORT, params, 3);
@@ -230,6 +233,7 @@ int _tmain(int argc, TCHAR *argv[])
 			CON_PUTS_1(_T("Invalid Parameter."));
 			hr = E_FAIL;
 		}
+//		hr = UPnP_InvokeAction(pService, &argv[2], &argv[3], argc - 3);
 		pService->Release();
 	}
 	else
@@ -238,17 +242,17 @@ int _tmain(int argc, TCHAR *argv[])
 	CON_PUTS_1(_T(""));
 	if (FAILED(hr))
 	{
-		TCHAR   wszMsgBuff[512] = _T("");  // Buffer for text.
+		TCHAR szMsgBuff[512] = _T("");  // Buffer for text.
 		
 		// Try to get the message from the system errors.
 		if (0 < ::FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
 		                        NULL,
 		                        hr,
 		                        0,
-		                        wszMsgBuff,
-		                        sizeof(wszMsgBuff) / sizeof(TCHAR),
+		                        szMsgBuff,
+		                        sizeof(szMsgBuff) / sizeof(TCHAR),
 		                        NULL))
-			CON_PUTS_1(wszMsgBuff);
+			CON_PUTS_1(szMsgBuff);
 	}
 	
 	::CoUninitialize();

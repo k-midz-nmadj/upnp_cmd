@@ -12,6 +12,7 @@
 #define UPNP_ACTION_ADDPORT _T("AddPortMapping")
 #define UPNP_ACTION_DELPORT _T("DeletePortMapping")
 #define UPNP_ACTION_GETEXIP _T("GetExternalIPAddress")
+#define UPNP_ACTION_GETPMAP _T("GetGenericPortMappingEntry")
 
 class CConsoleOutput
 {
@@ -28,12 +29,13 @@ public:
 		DWORD dwNumberOfCharsWrite = 0;
 		
 		return (!pszOutput || !pszOutput[0] ||
-			::WriteConsole(
-				hConsoleOutput,
-				pszOutput,
-				lstrlen(pszOutput),
-				&dwNumberOfCharsWrite,
-				NULL) ? dwNumberOfCharsWrite : -1);
+				::WriteConsole(
+					hConsoleOutput,
+					pszOutput,
+					lstrlen(pszOutput),
+					&dwNumberOfCharsWrite,
+					NULL) ? 
+				dwNumberOfCharsWrite : -1);
 	}
 } g_ConOut;
 #define CON_PUTS_1(s1)     (g_ConOut.Write(s1), g_ConOut.Write(_T("\n")))
@@ -44,7 +46,6 @@ public:
 HRESULT UPnP_getService(LPCTSTR pszServiceName, IUPnPService** pService)
 {
 	HRESULT hr;
-	_bstr_t bstrServiceType = UPNP_SERVICE_TYPE;
 	IUPnPDeviceFinder* pDeviceFinder;
 	IUPnPDevices*      pFoundDevices;
 	IEnumVARIANT*      pEnumDev;
@@ -58,7 +59,9 @@ HRESULT UPnP_getService(LPCTSTR pszServiceName, IUPnPService** pService)
 	if (FAILED(hr))
 		return hr;
 	
+	_bstr_t bstrServiceType = UPNP_SERVICE_TYPE;
 	bstrServiceType += pszServiceName;
+	
 	hr = pDeviceFinder->FindByType(bstrServiceType, 0, &pFoundDevices);
 	pDeviceFinder->Release();
 	if (FAILED(hr))
@@ -133,63 +136,63 @@ HRESULT UPnP_getService(LPCTSTR pszServiceName, IUPnPService** pService)
 
 HRESULT UPnP_InvokeAction(IUPnPService* pService, LPCTSTR pszActName, LPCTSTR* params = NULL, ULONG num = 0)
 {
-	SAFEARRAY* psa = ::SafeArrayCreateVector(VT_VARIANT, 0, num);
-	VARIANT* rgElems;
 	HRESULT hr;
-	
+	ULONG i;
+	VARIANT* rgElems;
+	SAFEARRAY* psa = ::SafeArrayCreateVector(VT_VARIANT, 0, num);
 	if (!psa)
 		return E_FAIL;
 	
-	hr = ::SafeArrayAccessData(psa, (void HUGEP**)&rgElems);
-	if (SUCCEEDED(hr))
+	_variant_t varInArgs, varOutArgs, varRet;
+	V_VT(&varInArgs) = VT_VARIANT | VT_ARRAY;
+	V_ARRAY(&varInArgs) = psa;
+	
+	if (num > 0)
 	{
-		_bstr_t bstrActName = pszActName;
-		_variant_t varInArgs, varOutArgs, varRet;
-		ULONG i;
+		hr = ::SafeArrayAccessData(psa, (void HUGEP**)&rgElems);
+		if (FAILED(hr))
+			return hr;
 		
-		CON_PUTS_2(_T("Action : "), pszActName);
 		for (i = 0; i < num; i++)
 		{
 			V_VT(&rgElems[i]) = VT_BSTR;
 			V_BSTR(&rgElems[i]) = ::SysAllocString(params[i]);
 		}
 		::SafeArrayUnaccessData(psa);
-		
-		V_VT(&varInArgs) = VT_VARIANT | VT_ARRAY;
-		V_ARRAY(&varInArgs) = psa;
-		
-		hr = pService->InvokeAction(bstrActName, varInArgs, &varOutArgs, &varRet);
-		if (FAILED(hr))
-		{
-			if (V_VT(&varRet) == VT_BSTR)
-				CON_PUTS_2(_T("Failed : "), V_BSTR(&varRet));
-		}
-		else if (V_ISARRAY(&varOutArgs) && (psa = varOutArgs.parray)->cDims == 1)
-		{
-			hr = ::SafeArrayAccessData(psa, (void HUGEP**)&rgElems);
-			if (SUCCEEDED(hr))
-			{
-				for (i = 0; i < psa->rgsabound[0].cElements; i++)
-				{
-					if (V_VT(&rgElems[i]) == VT_BSTR)
-						CON_PUTS_1(V_BSTR(&rgElems[i]));
-				}
-				::SafeArrayUnaccessData(psa);
-			}
-		}
 	}
-	else
-		::SafeArrayDestroy(psa);
 	
+	_bstr_t bstrActName = pszActName;
+	CON_PUTS_2(_T("Action : "), pszActName);
+	
+	hr = pService->InvokeAction(bstrActName, varInArgs, &varOutArgs, &varRet);
+	if (FAILED(hr))
+	{
+		if (V_VT(&varRet) == VT_BSTR)
+			CON_PUTS_2(_T("Failed : "), V_BSTR(&varRet));
+	}
+	else if (V_ISARRAY(&varOutArgs) && (psa = V_ARRAY(&varOutArgs))->rgsabound[0].cElements > 0)
+	{
+		hr = ::SafeArrayAccessData(psa, (void HUGEP**)&rgElems);
+		if (FAILED(hr))
+			return hr;
+		
+		for (i = 0; i < psa->rgsabound[0].cElements; i++)
+		{
+			if (V_VT(&rgElems[i]) == VT_BSTR)
+				CON_PUTS_1(V_BSTR(&rgElems[i]));
+		}
+		::SafeArrayUnaccessData(psa);
+	}
 	return hr;
 }
 
-int _tmain(int argc, TCHAR *argv[])
+int _tmain(int argc, const TCHAR *argv[])
 {
-	if (argc <= 1 || argc > 7)
+	if (argc < 2 || argc > 7)
 	{
 		CON_PUTS_1(_T("================== \"upnp_cmd\" Parameter Definition for each Action ==================\n"));
 		CON_PUTS_1(_T("GetExternalIPAddress : upnp_cmd type(WANIPConnection:1, WANPPPConnection:1, etc...)"));
+		CON_PUTS_1(_T("GetPortMappingEntry  : upnp_cmd type index"));
 		CON_PUTS_1(_T("AddPortMapping       : upnp_cmd type protocol port IPaddress [description] [duration]"));
 		CON_PUTS_1(_T("DeletePortMapping    : upnp_cmd type protocol port\n"));
 		SYS_PAUSE(argv[0]);
@@ -204,36 +207,29 @@ int _tmain(int argc, TCHAR *argv[])
 	hr = UPnP_getService(argv[1], &pService);
 	if (S_OK == hr && pService)
 	{
-		LPCTSTR params[] = {
-			_T(""),		// NewRemoteHost
-			argv[3],    // NewExternalPort
-			argv[2],    // NewProtocol
-			argv[3],    // NewInternalPort
-			argv[4],    // NewInternalClient
-			_T("1"),    // NewEnabled
-			_T(""),     // NewPortMappingDescription
-			_T("0")     // NewLeaseDuration
-		};
+		LPCTSTR params[] = {_T(""), NULL, argv[2], NULL, NULL, _T("1"), _T(""), _T("0")};
 		
 		switch (argc)	// ParameterCount=1/2/3~5
 		{
 		case 2:	// GetExternalIPAddress
-		case 3:
 			hr = UPnP_InvokeAction(pService, UPNP_ACTION_GETEXIP);
 			break;
+		case 3:	// GetGenericPortMappingEntry
+			hr = UPnP_InvokeAction(pService, UPNP_ACTION_GETPMAP, &argv[2], 1);
+			break;
 		case 4:	// DeletePortMapping
+			params[1] = argv[3];	// NewExternalPort
 			hr = UPnP_InvokeAction(pService, UPNP_ACTION_DELPORT, params, 3);
 			break;
 		case 7:	// AddPortMapping
-			params[7] = argv[6];
+			params[7] = argv[6];	// NewLeaseDuration
 		case 6:
-			params[6] = argv[5];
+			params[6] = argv[5];	// NewPortMappingDescription
 		case 5:
+			params[1] = params[3] = argv[3];	// NewExternalPort,NewInternalPort
+			params[4] = argv[4];	// NewInternalClient
 			hr = UPnP_InvokeAction(pService, UPNP_ACTION_ADDPORT, params, 8);
 			break;
-		default:
-			CON_PUTS_1(_T("Invalid Parameter."));
-			hr = E_FAIL;
 		}
 		pService->Release();
 	}
