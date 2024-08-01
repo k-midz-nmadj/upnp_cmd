@@ -27,21 +27,28 @@ public:
 		hConsoleOutput = ::GetStdHandle(STD_OUTPUT_HANDLE);
 	}
 	
-	int Write(LPCTSTR pszOutput)
+	int Write(LPCTSTR pszOutput, DWORD dwLength = 0)
 	{
 		DWORD dwNumberOfCharsWrite = 0;
 		
 		return (!pszOutput || !pszOutput[0] ||
-			::WriteConsole(
-				hConsoleOutput,
-				pszOutput,
-				lstrlen(pszOutput),
-				&dwNumberOfCharsWrite,
-				NULL) ? dwNumberOfCharsWrite : -1);
+				::WriteConsole(
+					hConsoleOutput,
+					pszOutput,
+					dwLength > 0 ? dwLength : lstrlen(pszOutput),
+					&dwNumberOfCharsWrite,
+					NULL) ? 
+				dwNumberOfCharsWrite : -1);
 	}
 } g_ConOut;
-#define CON_PUTS_1(s1)     (g_ConOut.Write(s1), g_ConOut.Write(_T("\n")))
-#define CON_PUTS_2(s1, s2) (g_ConOut.Write(s1), g_ConOut.Write(s2), g_ConOut.Write(_T("\n")))
+
+#define CON_PUTS(s)       g_ConOut.Write(s)
+#define CON_PUTS_n(s, n)  g_ConOut.Write(s, n)
+#define CON_PUTS_c(c)     CON_PUTS_n(_T(c), sizeof(_T(c)) / sizeof(TCHAR) - 1)
+#define CON_PUTS_b(b)     CON_PUTS_n(b, ::SysStringLen(b))
+#define CON_PUTS_cb(c, b) (CON_PUTS_c(c), CON_PUTS_b(b))
+#define CON_PUTS_bc(b, c) (CON_PUTS_b(b), CON_PUTS_c(c))
+#define CON_LF(...)       (__VA_ARGS__, CON_PUTS_c("\n"))
 #define SYS_PAUSE(c) {if (lstrcmpi(c, _T("upnp_cmd"))) _tsystem(_T("pause"));}
 
 
@@ -111,7 +118,7 @@ HRESULT UPnP_getService(LPCTSTR pszServiceName, IUPnPService** pService)
 				continue;
 			
 			// Do something interesting with pService
-			BSTR bstrType = NULL;
+			_bstr_t bstrType = NULL;
 			hr = (*pService)->get_ServiceTypeIdentifier(&bstrType);
 			if (SUCCEEDED(hr))
 			{
@@ -134,7 +141,7 @@ HRESULT UPnP_InvokeAction(IUPnPService* pService, LPCTSTR pszActName, LPCTSTR* p
 	VARIANT* rgElems;
 	SAFEARRAY* psa = ::SafeArrayCreateVector(VT_VARIANT, 0, num);
 	if (!psa)
-		return E_FAIL;
+		return E_OUTOFMEMORY;
 	
 	_variant_t varInArgs, varOutArgs, varRet;
 	V_VT(&varInArgs) = VT_VARIANT | VT_ARRAY;
@@ -155,13 +162,13 @@ HRESULT UPnP_InvokeAction(IUPnPService* pService, LPCTSTR pszActName, LPCTSTR* p
 	}
 	
 	_bstr_t bstrActName = pszActName;
-	CON_PUTS_2(_T("Action : "), pszActName);
+	CON_LF(CON_PUTS_cb("Action : ", bstrActName));
 	
 	hr = pService->InvokeAction(bstrActName, varInArgs, &varOutArgs, &varRet);
 	if (FAILED(hr))
 	{
 		if (V_VT(&varRet) == VT_BSTR)
-			CON_PUTS_2(_T("Failed : "), V_BSTR(&varRet));
+			CON_LF(CON_PUTS_cb("Failed : ", V_BSTR(&varRet)));
 	}
 	else if (V_ISARRAY(&varOutArgs) && (psa = V_ARRAY(&varOutArgs))->rgsabound[0].cElements > 0)
 	{
@@ -172,7 +179,7 @@ HRESULT UPnP_InvokeAction(IUPnPService* pService, LPCTSTR pszActName, LPCTSTR* p
 		for (i = 0; i < psa->rgsabound[0].cElements; i++)
 		{
 			if (V_VT(&rgElems[i]) == VT_BSTR)
-				CON_PUTS_1(V_BSTR(&rgElems[i]));
+				CON_LF(CON_PUTS_b(V_BSTR(&rgElems[i])));
 		}
 		::SafeArrayUnaccessData(psa);
 	}
@@ -181,13 +188,13 @@ HRESULT UPnP_InvokeAction(IUPnPService* pService, LPCTSTR pszActName, LPCTSTR* p
 
 int _tmain(int argc, const TCHAR *argv[])
 {
-	if (argc <= 1 || argc > 7)
+	if (argc < 2 || argc > 7)
 	{
-		CON_PUTS_1(_T("================== \"upnp_cmd\" Parameter Definition for each Action ==================\n"));
-		CON_PUTS_1(_T("GetExternalIPAddress : upnp_cmd type(WANIPConnection:1, WANPPPConnection:1, etc...)"));
-		CON_PUTS_1(_T("GetPortMappingEntry  : upnp_cmd type index"));
-		CON_PUTS_1(_T("AddPortMapping       : upnp_cmd type protocol port IPaddress [description] [duration]"));
-		CON_PUTS_1(_T("DeletePortMapping    : upnp_cmd type protocol port\n"));
+		CON_PUTS_c("================== \"upnp_cmd\" Parameter Definition for each Action ==================\n\n");
+		CON_PUTS_c("GetExternalIPAddress : upnp_cmd type(WANIPConnection:1, WANPPPConnection:1, etc...)\n");
+		CON_PUTS_c("GetPortMappingEntry  : upnp_cmd type index\n");
+		CON_PUTS_c("AddPortMapping       : upnp_cmd type protocol port IPaddress [description] [duration]\n");
+		CON_PUTS_c("DeletePortMapping    : upnp_cmd type protocol port\n\n");
 		SYS_PAUSE(argv[0]);
 		return 0;
 	}
@@ -229,30 +236,26 @@ int _tmain(int argc, const TCHAR *argv[])
 		case 5:
 			hr = UPnP_InvokeAction(pService, UPNP_ACTION_ADDPORT, params, 8);
 			break;
-		default:
-			CON_PUTS_1(_T("Invalid Parameter."));
-			hr = E_FAIL;
 		}
 //		hr = UPnP_InvokeAction(pService, &argv[2], &argv[3], argc - 3);
 		pService->Release();
 	}
 	else
-		CON_PUTS_1(_T("Not Found UPnP Service."));
+		CON_PUTS_c("Not Found UPnP Service.\n");
 	
-	CON_PUTS_1(_T(""));
+	CON_LF(0);
 	if (FAILED(hr))
 	{
 		TCHAR szMsgBuff[512] = _T("");  // Buffer for text.
-		
-		// Try to get the message from the system errors.
-		if (0 < ::FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-		                        NULL,
-		                        hr,
-		                        0,
-		                        szMsgBuff,
-		                        sizeof(szMsgBuff) / sizeof(TCHAR),
-		                        NULL))
-			CON_PUTS_1(szMsgBuff);
+		DWORD dwLength = ::FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+		                                 NULL,
+		                                 hr,
+		                                 0,
+		                                 szMsgBuff,
+		                                 sizeof(szMsgBuff) / sizeof(TCHAR),
+		                                 NULL);	// Try to get the message from the system errors.
+		if (dwLength > 0)
+			CON_LF(CON_PUTS_n(szMsgBuff, dwLength));
 	}
 	
 	::CoUninitialize();
