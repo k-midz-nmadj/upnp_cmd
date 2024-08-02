@@ -121,8 +121,8 @@ HRESULT UPnP_getService(LPCTSTR pszServiceName, IUPnPService** pService)
 				continue;
 			
 			// Do something interesting with pService
-			_bstr_t bstrType = NULL;
-			hr = (*pService)->get_ServiceTypeIdentifier(&bstrType);
+			_bstr_t bstrType;
+			hr = (*pService)->get_ServiceTypeIdentifier(bstrType.GetAddress());
 			if (SUCCEEDED(hr))
 			{
 				if (VARCMP_EQ == VarBstrCmp(bstrType, bstrServiceType, LOCALE_SYSTEM_DEFAULT, NORM_IGNORECASE))

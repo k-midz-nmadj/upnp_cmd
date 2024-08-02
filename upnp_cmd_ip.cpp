@@ -55,7 +55,6 @@ public:
 HRESULT UPnP_getService(LPCTSTR pszServiceName, IUPnPService** pService)
 {
 	HRESULT hr;
-	_bstr_t bstrServiceType = UPNP_SERVICE_TYPE;
 	_COM_PTR_T(IUPnPDeviceFinder) pDeviceFinder;
 	_COM_PTR_T(IUPnPDevices)      pFoundDevices;
 	_COM_PTR_T(IEnumVARIANT)      pEnumDev;
@@ -68,7 +67,9 @@ HRESULT UPnP_getService(LPCTSTR pszServiceName, IUPnPService** pService)
 	if (FAILED(hr))
 		return hr;
 	
+	_bstr_t bstrServiceType = UPNP_SERVICE_TYPE;
 	bstrServiceType += pszServiceName;
+	
 	hr = pDeviceFinder->FindByType(bstrServiceType, 0, &pFoundDevices);
 	if (FAILED(hr))
 		return hr;
@@ -118,8 +119,8 @@ HRESULT UPnP_getService(LPCTSTR pszServiceName, IUPnPService** pService)
 				continue;
 			
 			// Do something interesting with pService
-			_bstr_t bstrType = NULL;
-			hr = (*pService)->get_ServiceTypeIdentifier(&bstrType);
+			_bstr_t bstrType;
+			hr = (*pService)->get_ServiceTypeIdentifier(bstrType.GetAddress());
 			if (SUCCEEDED(hr))
 			{
 				if (VARCMP_EQ == VarBstrCmp(bstrType, bstrServiceType, LOCALE_SYSTEM_DEFAULT, NORM_IGNORECASE))
